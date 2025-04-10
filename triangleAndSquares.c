@@ -22,7 +22,6 @@ typedef struct {
 	float z;
 } centroide;
 
-// Fun��o callback de redesenho da janela de visualiza��o
 
 
 
@@ -30,9 +29,9 @@ typedef struct {
 //o melhor pelo que entendi eh ter o left bottom do triangulo na origem
 
 
-// Os proximos passos sao: colocar os quadrados e rotaciona-los
+//
 // 
-// 
+// distance e calculateTriangleSides sao funcoes axiliares
 float distance(float x1, float y1, float x2, float y2) {
 	return sqrtf((x2 - x1)*(x2 - x1) + (y2 - y1)*(y2 - y1));
 }
@@ -51,15 +50,54 @@ void CalculateTriangleSides() {
 	printf("Lado BC: %.3f\n", BC);
 	printf("Lado CA: %.3f\n", CA);
 }
+//
+//
+//
+void DesenhaQuadradoNaAresta(float x1, float y1, float x2, float y2, int inverted) {
+	// Vetor da base do quadrado (x2 - x1, y2 - y1)
+	
+	float dx = x2 - x1;
+	float dy = y2 - y1;
+  
+	// Vetor perpendicular (90 graus anti-horário)
+	float px = -dy;
+	float py = dx;
+
+	if(inverted){
+		px = -px;
+		py = -py;
+	}
+  
+	// Normaliza o perpendicular
+	float length = sqrtf(px * px + py * py);
+	px /= length;
+	py /= length;
+  
+	// Escala o perpendicular pelo comprimento do lado
+	float sideLength = sqrtf(dx * dx + dy * dy);
+	px *= sideLength;
+	py *= sideLength;
+  
+	// Cores azuis
+	glColor3f(0.0f, 1.0f, 0.0f);
+  
+	// Desenha o quadrado
+	glBegin(GL_QUADS);
+	    glVertex3f(x1, y1, 0);                 // Base esquerda
+	    glVertex3f(x2, y2, 0);                 // Base direita
+	    glVertex3f(x2 + px, y2 + py, 0);       // Topo direito deslocamos x2(um ponto da base do triangulo) na direcao do vetor perpendicular
+	    glVertex3f(x1 + px, y1 + py, 0);       // Topo esquerdo
+	glEnd();
+}
 void CalculateUpperDotTriangle(float ax, float ay, float bx, float by){
 
 	// // Calcula ponto do meio da base
 	float middleX = (ax + bx)/ 2.0f;
-	float middleY = (bx + by) / 2.0f;
+	float middleY = (ay + by) / 2.0f;
 
 	//vetor perpendicular a base
 	float perpX = -(by -ay);
-	float perpY = bx - ax;
+	float perpY = (bx - ax);
 
 	// Normaliza
 	float length = sqrt(perpX * perpX + perpY * perpY);
@@ -72,18 +110,26 @@ void CalculateUpperDotTriangle(float ax, float ay, float bx, float by){
 	float cx = middleX + perpX * height;
 	float cy = middleY + perpY * height;
 
-    
-    
+	glColor3f(0.0f, 1.0f, 0.0f);
+	DesenhaQuadradoNaAresta(ax, ay,bx, by, 1); //todos os 3 precisam estar invertidos pq o vetor perpendicular tem q apontar pra fora
+	DesenhaQuadradoNaAresta(bx, by, cx, cy, 1);
+	DesenhaQuadradoNaAresta(cx, cy, ax, ay, 1);
+
+	glColor3f(0.0f, 0.0f, 1.0f);
 	glBegin(GL_TRIANGLES);
 		glVertex3f(ax, ay, 0);
 		glVertex3f(bx, by, 0);
 		glVertex3f(cx, cy, 0);
 	glEnd();
+
+	
     
 }
 
+
+
 void DesenhaTriangulo(){
-    glClearColor(1,1,1,0);
+    
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	// Define a cor de desenho: vermelho
@@ -93,10 +139,11 @@ void DesenhaTriangulo(){
 		// Use a função com dois pontos da base do triângulo
 		float ax = 0.0f, ay = 0.0f;
 		float bx = 1.0f, by = 0.0f;
+		
+
 	
 		CalculateUpperDotTriangle(ax,ay,bx, by);
 
-        
 
     	glPopMatrix();
     	glFlush();
@@ -107,33 +154,7 @@ void DesenhaTriangulo(){
 
 
 
-void DesenhaQuadrado(void)
-{
-	// Limpa a janela de visualiza��o com a cor branca
-	glClearColor(1,1,1,0);
-	glClear(GL_COLOR_BUFFER_BIT);
 
-	// Define a cor de desenho: vermelho
-	glColor3f(0,0,1);
-	
-	//scale function always comes first
-	//glScalef(0.5, 0.5, 0.5); // o quadrado eh metade da viewport
-	glRotatef(angulo, 0 ,0,1);
-	//glTranslatef()
-
-	// Desenha um quadrado
-	glBegin(GL_QUADS);
-		glVertex3f(-0.75,-0.75,0); //left bottom
-		glVertex3f(0.75,-0.75,0); //right bottom
-		glVertex3f(0.75,0.75,0); //top right
-		glVertex3f(-0.75,0.75,0); //top left
-	glEnd();
-
-    
-	
-	//Executa os comandos OpenGL 
-	glFlush();
-}
 
 // Fun��o callback chamada para gerenciar eventos de teclas
 void Teclado (unsigned char key, int x, int y)
@@ -150,7 +171,7 @@ void Inicializa(void)
 {
 	// Define a janela de visualiza��o 2D
 	glMatrixMode(GL_PROJECTION);
-	gluOrtho2D(-1.0,1.0,-1.0,1.0);
+	gluOrtho2D(-1.5, 1.5, -1.5, 1.5);
 	glMatrixMode(GL_MODELVIEW);
 }
 
@@ -180,7 +201,6 @@ int main(int argc, char **argv)
  
 	// Inicia o processamento e aguarda intera��es do usu�rio
 	glutMainLoop();
-	printf("teste\n");
  
 	return 0;
 }
