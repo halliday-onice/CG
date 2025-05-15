@@ -53,42 +53,45 @@ void CalculateTriangleSides() {
 //
 //
 //
+
 void DesenhaQuadradoNaAresta(float x1, float y1, float x2, float y2, int inverted) {
-	// Vetor da base do quadrado (x2 - x1, y2 - y1)
-	
 	float dx = x2 - x1;
 	float dy = y2 - y1;
   
-	// Vetor perpendicular (90 graus anti-horário)
-	float px = -dy;
-	float py = dx;
+	float lado = sqrt(dx * dx + dy * dy);
+	float angulo = atan2(dy, dx) * 180 / M_PI;
+  
+	glPushMatrix();
+  
+	    //Translada para o ponto médio da base
+	    float meioX = (x1 + x2) / 2.0f;
+	    float meioY = (y1 + y2) / 2.0f;
+	    glTranslatef(meioX, meioY, 0);
+  
+	    // rotaciona a partir do meio
+	    glRotatef(angulo, 0, 0, 1);
+  
+	    //se for invertido, gira mais 180 graus
+	    if (inverted) {
+		  glRotatef(180, 0, 0, 1);
+	    }
+  
+	    glTranslatef(-lado / 2.0f, 0 , 0);  // Desloca para cima da base
+	    //Desenha o quadrado
+	    glColor3f(0.0f, 1.0f, 0.0f);
+	    glBegin(GL_QUADS);
+		  glVertex3f(0, 0, 0);
+		  glVertex3f(lado, 0, 0);
+		  glVertex3f(lado, lado, 0);
+		  glVertex3f(0, lado, 0);
+	    glEnd();
+  
+	glPopMatrix();
+  }
+  
+  
+  
 
-	if(inverted){
-		px = -px;
-		py = -py;
-	}
-  
-	// Normaliza o perpendicular
-	float length = sqrtf(px * px + py * py);
-	px /= length;
-	py /= length;
-  
-	// Escala o perpendicular pelo comprimento do lado
-	float sideLength = sqrtf(dx * dx + dy * dy);
-	px *= sideLength;
-	py *= sideLength;
-  
-	// Cores azuis
-	glColor3f(0.0f, 1.0f, 0.0f);
-  
-	// Desenha o quadrado
-	glBegin(GL_QUADS);
-	    glVertex3f(x1, y1, 0);                 // Base esquerda
-	    glVertex3f(x2, y2, 0);                 // Base direita
-	    glVertex3f(x2 + px, y2 + py, 0);       // Topo direito deslocamos x2(um ponto da base do triangulo) na direcao do vetor perpendicular
-	    glVertex3f(x1 + px, y1 + py, 0);       // Topo esquerdo
-	glEnd();
-}
 void CalculateUpperDotTriangle(float ax, float ay, float bx, float by){
 
 	// // Calcula ponto do meio da base
@@ -98,9 +101,10 @@ void CalculateUpperDotTriangle(float ax, float ay, float bx, float by){
 	//vetor perpendicular a base
 	float perpX = -(by -ay);
 	float perpY = (bx - ax);
-
+	printf("perpX: %f perpY: %f\n", perpX, perpY);
 	// Normaliza
 	float length = sqrt(perpX * perpX + perpY * perpY);
+	
 	perpX /= length;
 	perpY /= length;
 	
@@ -171,7 +175,7 @@ void Inicializa(void)
 {
 	// Define a janela de visualiza��o 2D
 	glMatrixMode(GL_PROJECTION);
-	gluOrtho2D(-1.5, 1.5, -1.5, 1.5);
+	gluOrtho2D(-2.5, 2.5, -2.5, 2.5);
 	glMatrixMode(GL_MODELVIEW);
 }
 

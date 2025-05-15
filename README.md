@@ -35,3 +35,7 @@ Onde ```-I/opt/homebrew/include``` Diz pro compilador onde encontrar os arquivos
 
 ```lm``` faz o link com a biblioteca que possui varias implementações de funções matemáticas
 Para rodar basta fazer ```./nomeArquivo```
+
+Para rodar arquivos cpp basta fazer ```g++ nomeArquivo.cpp -o nomeArquivo -I/opt/homebrew/include```
+
+Precisa vincular os frameworks OpenGL e Glut explicitamente como ```g++ cameraTask.cpp -o cameraTask -framework OpenGL -framework GLUT -I/opt/homebrew/include```
