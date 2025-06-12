@@ -3,6 +3,7 @@
 #include <cmath>
 #include <GLUT/glut.h>
 #include <OpenGL/gl.h>
+#include <vector>
 
 const int w = 1400;
 const int h = 1000;
@@ -14,7 +15,15 @@ float terrain[columns][rows];
 struct Vertex {
     float v1, v2, v3;
 };
+struct Triangle {
+    float v1[3]; // as coordenadas do vértice com os valores (x,y,z)
+    float v2[3];
+    float v3[3];
+};
 
+
+
+std::vector<Triangle> triangles;
 class Camera {
 public:
     float camX = 0.0f, camY = 300.0f, camZ = 300.0f;
@@ -60,15 +69,19 @@ void initTerrain() {
 }
 
 void drawTerrain() {
+    // Conventional coordinate system: XZ plane, Y up
     glColor3f(0.2f, 0.6f, 0.3f);  // Set terrain color (green)
     glPushMatrix();
     glTranslatef(-w/2, 0, -h/2);  // Center terrain at origin
-    
+    //y: linha atual
+    //y + 1: próxima linha
     for (int y = 0; y < rows - 1; y++) {
         glBegin(GL_TRIANGLE_STRIP);
         for (int x = 0; x < columns; x++) {
-            // Conventional coordinate system: XZ plane, Y up
+            
+             // Send vertex from current row
             glVertex3f(x * scl, terrain[x][y], y * scl);
+            // Send vertex from next row
             glVertex3f(x * scl, terrain[x][y+1], (y+1) * scl);
         }
         glEnd();
