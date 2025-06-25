@@ -1,5 +1,6 @@
 #define GL_SILENCE_DEPRECATION
 #include <iostream>
+#include <iomanip>
 #include <cmath>
 #include <GLUT/glut.h>
 #include <OpenGL/gl.h>
@@ -7,57 +8,33 @@
 #include <unordered_map>
 #include <memory> // <- necessário para unique_ptr
 
-const int w = 1400;
-const int h = 1000;
-const int scl = 20;
-const int columns = w / scl;
-const int rows = h / scl;
-float terrain[columns][rows];
+
+
+const int WIDTH = 1400;
+const int HEIGHT = 1000;
+const int TERRAIN_SCALE = 20;
+const int COLUMNS = WIDTH/ TERRAIN_SCALE;
+const int ROWS = HEIGHT / TERRAIN_SCALE;
+
 
 struct Vertex {
     float x, y, z;
-
-    bool operator==(const Vertex& other) const {
-        return x == other.x && y == other.y && z == other.z;
-    }
 };
 
-struct Triangle {
-    Vertex v1, v2, v3;
-    Triangle(Vertex a, Vertex b, Vertex c) : v1(a), v2(b), v3(c) {}
+struct Particle {
+    float x,y,z;
+    int currentVertexIndex = -1; // inicializa com -1 porque ainda não conhece o proximo destino válido para se mover
 };
 
-std::vector<Triangle> triangles;
 
-struct Edge {
-    int v1Index, v2Index;
-    Edge(int a, int b) {
-        v1Index = std::min(a, b);
-        v2Index = std::max(a, b);
-    }
-};
+Particle particle;
+std::vector<Vertex> vertices;
+std::vector<int> indices;
+std::vector<std::vector<int>> adjencyList; //cria uma lista de vertices, e pra cada um deles, tem uma lista dos vizinhos
+//o indice da lista externa std::vector< ... > eh o indice do vertice que estamos consultando atualmente
+//a lista interna std::vector<int>
+// O índice da lista externa corresponde ao índice do vértice que estamos consultando
 
-struct EdgeNode {
-    Edge edge;
-    std::unique_ptr<EdgeNode> next;
-    EdgeNode(Edge e) : edge(e), next(nullptr) {}
-};
-
-struct VertexEdges {
-    std::unique_ptr<EdgeNode> head;
-
-    VertexEdges() = default;
-
-    void addEdge(const Edge& e) {
-        std::unique_ptr<EdgeNode> newNode = std::make_unique<EdgeNode>(e);
-        newNode->next = std::move(head);
-        head = std::move(newNode);
-    }
-};
-
-std::vector<Vertex> vertexList;
-std::unordered_map<std::string, int> vertexIndexMap;
-std::vector<VertexEdges> vertexEdgeList;
 
 struct Camera {
     float camX = 700.0f, camY = 800.0f, camZ = 1200.0f;
@@ -98,85 +75,108 @@ struct Camera {
 
 Camera camera;
 
-void initTerrain() {
-    for (int x = 0; x < columns; x++) {
-        for (int y = 0; y < rows; y++) {
-           terrain[x][y] = 30 * sin(x * 0.1f) * cos(y * 0.1f) + 15 * sin(x * 0.5f) * sin(y * 0.3f) + 8  * cos(x * 1.5f + y * 0.2f);
-
-        }
-    }
-}
-
 std::string makeKey(const Vertex& v) {
     return std::to_string(v.x) + "," + std::to_string(v.y) + "," + std::to_string(v.z);
 }
 
-int getOrAddVertexIndex(const Vertex& v) {
-    std::string key = makeKey(v);
-    if (vertexIndexMap.find(key) == vertexIndexMap.end()) {
-        int index = vertexList.size();
-        vertexList.push_back(v);
-        vertexEdgeList.emplace_back();
-        vertexIndexMap[key] = index;
-    }
-    return vertexIndexMap[key];
-}
-
-void printEdgesForVertex(int vertexIndex) {
-    if (vertexIndex < 0 || vertexIndex >= vertexEdgeList.size()) {
-        std::cout << "Índice de vértice inválido.\n";
-        return;
-    }
-
-    const Vertex& v = vertexList[vertexIndex];
-    std::cout << "Vértice [" << vertexIndex << "] (" << v.x << ", " << v.y << ", " << v.z << ") está conectado a:\n";
-
-    EdgeNode* node = vertexEdgeList[vertexIndex].head.get(); // usando unique_ptr agora
-    while (node) {
-        std::cout << "  Aresta entre vértices [" << node->edge.v1Index << "] e [" << node->edge.v2Index << "]\n";
-        node = node->next.get();
-    }
-}
-
 
 void generateTerrain() {
-    for (int y = 0; y < rows - 1; y++) {
-        for (int x = 0; x < columns - 1; x++) {
-            Vertex v0 = { static_cast<float>(x * scl), terrain[x][y], static_cast<float>(y * scl) };
-            Vertex v1 = { static_cast<float>(x * scl),terrain[x][y+1], static_cast<float>((y+1) * scl) };
-            Vertex v2 = { static_cast<float>((x+1) * scl),terrain[x+1][y], static_cast<float>(y * scl) };
-            Vertex v3 = { static_cast<float>((x+1) * scl),terrain[x+1][y+1],static_cast<float>((y+1) * scl) };
+    //primeiro gerar todos os vertices da grade
+    vertices.reserve(COLUMNS * ROWS);
+    for (int y = 0; y < ROWS; y++) {
+        for (int x = 0; x < COLUMNS; x++) {
+            float height = -300 * sin(x * 0.1f) * cos(y * 0.1f) + 150 * sin(x * 0.5f) * sin(y * 0.3f) + 80 * cos(x * 1.5f + y * 0.2f);
+            Vertex v;
+            v.x = x * TERRAIN_SCALE;
+            v.y = height;
+            v.z = y * TERRAIN_SCALE;
+            vertices.push_back(v);
+        }
+    }
+    adjencyList.assign(vertices.size(), std::vector<int>()); // Apague todo o conteúdo de adjacencyList. Depois, preencha adjacencyList com vertices.size()  cópias de um novo vetor de inteiros vazio.
+    //O vetor indices armazena os "endereços" dos vértices que formam cada triângulo
+    // cada um triangulo precisa de 3 indices para os vertices, e cada quadrado tem 2 triangulos
+    //logo 2 * 3 indices por quadrado
+    indices.reserve((ROWS - 1) * (COLUMNS - 1) * 6);
 
-            int i0 = getOrAddVertexIndex(v0);
-            int i1 = getOrAddVertexIndex(v1);
-            int i2 = getOrAddVertexIndex(v2);
-            int i3 = getOrAddVertexIndex(v3);
+    //gerar os indices dos vertices e a lista de adj
+    for(int y = 0; y < ROWS - 1; y++){
+        for(int x = 0; x <COLUMNS - 1; x++){
+            //pegar os 4 indices do quadrado
+            int topLeft = y * COLUMNS + x; //top left
+            int bottomLeft = (y + 1) * COLUMNS + x;
+            int topRight =  y * COLUMNS + (x + 1);
+            int bottomRight = (y + 1) * COLUMNS + (x + 1);
 
-            triangles.push_back(Triangle(v0, v1, v2));
-            triangles.push_back(Triangle(v2, v1, v3));
+            //adiciono os dois triangulos para renderezicao
+            indices.push_back(topLeft);
+            indices.push_back(bottomLeft);
+            indices.push_back(topRight);
+            indices.push_back(topRight);
+            indices.push_back(bottomLeft);
+            indices.push_back(bottomRight);
 
-            vertexEdgeList[i0].addEdge(Edge(i0, i1));
-            vertexEdgeList[i1].addEdge(Edge(i1, i2));
-            vertexEdgeList[i2].addEdge(Edge(i2, i0));
-            vertexEdgeList[i2].addEdge(Edge(i2, i1));
-            vertexEdgeList[i1].addEdge(Edge(i1, i3));
-            vertexEdgeList[i3].addEdge(Edge(i3, i2));
+            // adiciona as conexoes
+            //
+            adjencyList[topLeft].push_back(bottomLeft); adjencyList[bottomLeft].push_back(topLeft);
+            adjencyList[topLeft].push_back(topRight); adjencyList[topRight].push_back(topLeft);
+            adjencyList[bottomLeft].push_back(topRight); adjencyList[topRight].push_back(bottomLeft); // Aresta diagonal
+            adjencyList[bottomLeft].push_back(bottomRight); adjencyList[bottomRight].push_back(bottomLeft);
+            adjencyList[topRight].push_back(bottomRight); adjencyList[bottomRight].push_back(topRight);
         }
     }
 }
 
 void drawTerrain() {
-    glColor3f(0.2f, 0.6f, 0.3f);
     glPushMatrix();
-    glTranslatef(-w / 2, -h / 2, 0);
-    for (const Triangle& t : triangles) {
-        glBegin(GL_TRIANGLES);
-        glVertex3f(t.v1.x, t.v1.y, t.v1.z);
-        glVertex3f(t.v2.x, t.v2.y, t.v2.z);
-        glVertex3f(t.v3.x, t.v3.y, t.v3.z);
-        glEnd();
-    }
+    glTranslatef(-WIDTH/ 2.0f, -HEIGHT/2.0f, 0.0f);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glVertexPointer(3, GL_FLOAT, sizeof(Vertex), vertices.data());
+    glColor3f(0.2f, 0.6f, 0.3f);
+    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data());
+    glDisableClientState(GL_VERTEX_ARRAY);
+
     glPopMatrix();
+}
+
+void drawParticle(){
+    glPushMatrix();
+    glTranslatef(-WIDTH / 2.0f, -HEIGHT / 2.0f, 0);
+    glTranslatef(particle.x, particle.y, particle.z);
+    glColor3f(1.0f, 0.0f, 0.0f);
+    glutSolidSphere(10.0, 16, 16);
+    glPopMatrix();
+}
+
+
+void movementInfo(int fromIndex, int toIndex){
+    //check for valid indices
+    if(fromIndex < 0 || fromIndex >= vertices.size() || toIndex < 0 || toIndex >= vertices.size()){
+        return;
+    }
+
+
+    const Vertex& fromVertex = vertices[fromIndex];
+    const Vertex& toVertex = vertices[toIndex];
+
+
+    // Configura o std::cout para imprimir números de ponto flutuante com 2 casas decimais
+    std::cout << std::fixed << std::setprecision(2);
+    
+    std::cout << "Movendo particula:" << std::endl;
+    std::cout << "  De (Atual):  Vertice [" << fromIndex << "] | Altura: " << fromVertex.y << std::endl;
+    std::cout << "  Para (Proximo): Vertice [" << toIndex << "] | Altura: " << toVertex.y << std::endl;
+    std::cout << "------------------------------------------" << std::endl;
+}
+
+void resetParticle() {
+    if (vertices.empty()) 
+        return;
+    particle.currentVertexIndex = rand() % vertices.size();
+    const auto& startVertex = vertices[particle.currentVertexIndex];
+    particle.x = startVertex.x;
+    particle.y = startVertex.y;
+    particle.z = startVertex.z;
 }
 
 void handleKeyboard(unsigned char key, int x, int y) {
@@ -186,8 +186,42 @@ void handleKeyboard(unsigned char key, int x, int y) {
         case 's': camera.moveForward(-10); break;
         case 'a': camera.rotateY(-5); break;  //left
         case 'd': camera.rotateY(5);  break;  //right
+        case 'r': resetParticle(); break;
     }
     glutPostRedisplay();
+}
+void flowSimulation(int value){
+    if (particle.currentVertexIndex < 0){
+        resetParticle();
+    }
+
+    int currentIndex = particle.currentVertexIndex;
+    const auto& neighbors = adjencyList[currentIndex];
+
+    int nextIndexToMove = -1;
+
+    float minimumHeight = vertices[currentIndex].y;
+
+    //procurando pela menor altura
+    for(int indexOfNeighbor: neighbors){
+        if(vertices[indexOfNeighbor].y < minimumHeight ){ //busca por um vizinho mais baixo, se achar atualizo o indice para p vertice 
+            minimumHeight  = vertices[indexOfNeighbor].y;
+            nextIndexToMove = indexOfNeighbor;
+        }
+    }
+    //se nextIndexToMove for igual a -1, nao foi encontrado um vizinho mais baixo que a posicao atual
+    if (nextIndexToMove != -1){
+        movementInfo(currentIndex, nextIndexToMove);
+        particle.currentVertexIndex = nextIndexToMove; // "faça com que a animacao va para a direcao do"
+        const auto& nextVertex = vertices[nextIndexToMove]; // forma moderna e eficiente em C++ de se referir a um objeto sem criar uma cópia dele, o que torna o código mais rápido
+        //atualiza as posicoes, visualmente na animacao
+        particle.x = nextVertex.x;
+        particle.y = nextVertex.y;
+        particle.z = nextVertex.z;
+    }
+
+    glutPostRedisplay(); // é o comando que garante que a função display() seja chamada para desenhar a partícula em sua nova posição
+    glutTimerFunc(100, flowSimulation, 0);
 }
 
 void reshape(int width, int height) {
@@ -203,6 +237,7 @@ void display() {
     glLoadIdentity();
     camera.applyView();
     drawTerrain();
+    drawParticle();
     glutSwapBuffers();
 }
 
@@ -216,15 +251,12 @@ int main(int argc, char **argv) {
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
 
-    initTerrain();
     generateTerrain();
-
-    // ✅ Teste da lista de arestas do vértice 0
-    printEdgesForVertex(0);
-
+    resetParticle();
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(handleKeyboard);
+    glutTimerFunc(100, flowSimulation, 0);
 
     glutMainLoop();
     return 0;
