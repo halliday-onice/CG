@@ -379,8 +379,8 @@ int main(int argc, char **argv) {
     camera.tx = 0; camera.ty = 0; camera.tz = 0;   // Olhando para a origem
     //generateTerrain();
 
-    if(!loadOBJ("terra.obj", "terra.mtl",&model)){
-        printf("erro ao importar o objeto\n");
+    if(!loadOBJ("irregular.obj", "irregular.mtl", &model)){
+        printf("erro importando o objeto\n");
         return -1;
     }
 
