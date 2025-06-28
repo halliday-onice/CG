@@ -12,25 +12,21 @@
 
 // para compilar importando o terreno: 
 //  g++ terrainGenaration.cpp mybib.c -o terrain -framework OpenGL -framework GLUT 
+//  vai dar um warning por conta da diferenca de c e c++
 
 
 const int WIDTH = 1400;
 const int HEIGHT = 1000;
-const int TERRAIN_SCALE = 20;
+const int TERRAIN_SCALE = 20; //isso aqui eh pra o terreno nao ter 
 const int COLUMNS = WIDTH/ TERRAIN_SCALE;
 const int ROWS = HEIGHT / TERRAIN_SCALE;
-
-
-// struct Vertex {
-//     float x, y, z;
-// };
 
 struct Particle {
     float x,y,z;
     int currentVertexIndex = -1; // inicializa com -1 porque ainda não conhece o proximo destino válido para se mover
 };
 
-
+Camera camera;
 Particle particle;
 std::vector<Vertex> vertices;
 std::vector<int> indices;
@@ -40,44 +36,6 @@ std::vector<std::vector<int>> adjencyList; //cria uma lista de vertices, e pra c
 // O índice da lista externa corresponde ao índice do vértice que estamos consultando
 ObjModel model;
 
-// struct Camera {
-//     float camX = 700.0f, camY = 800.0f, camZ = 1200.0f;
-//     float targetX = 700.0f, targetY = 0.0f, targetZ = 550.0f;
-
-//     void moveForward(float passo) {
-//         float dx = targetX - camX;
-//         float dy = targetY - camY;
-//         float dz = targetZ - camZ;
-
-//         float len = sqrt(dx*dx + dy*dy + dz*dz);
-//         if (len > 0.001f) {
-//             dx /= len; dy /= len; dz /= len;
-//             camX += dx * passo;
-//             camY += dy * passo;
-//             camZ += dz * passo;
-//             targetX += dx * passo;
-//             targetY += dy * passo;
-//             targetZ += dz * passo;
-//         }
-//     }
-//     void rotateY(float angle) {
-//         float rad = angle * M_PI / 180.0f;
-//         float cosA = cos(rad);
-//         float sinA = sin(rad);
-
-//         float dx = targetX - camX;
-//         float dz = targetZ - camZ;
-
-//         targetX = camX + dx * cosA - dz * sinA;
-//         targetZ = camZ + dx * sinA + dz * cosA;
-//     }
-
-//     void applyView() {
-//         gluLookAt(camX, camY, camZ, targetX, targetY, targetZ, 0.0f, 1.0f, 0.0f);
-//     }
-// };
-
-Camera camera;
 
 void cameraApplyView(const Camera* cam) {
     gluLookAt(cam->px, cam->py, cam->pz, cam->tx, cam->ty, cam->tz, 0.0f, 1.0f, 0.0f);
@@ -110,14 +68,113 @@ void cameraRotateY(Camera* cam, float angle) {
 }
 
 void resetParticle() {
-    if (vertices.empty()) 
-        return;
-    particle.currentVertexIndex = rand() % vertices.size();
-    const auto& startVertex = vertices[particle.currentVertexIndex];
-    particle.x = startVertex.x;
-    particle.y = startVertex.y;
-    particle.z = startVertex.z;
+    //desativo a particula, colocando o currentVertexIndex = -1
+    particle.currentVertexIndex = -1;
+    std::cout << "Particle was reseted" << std::endl;
 }
+
+
+// =======================
+// Geração de um terreno pelo código
+// =======================
+void generateProceduralTerrain() {
+    vertices.clear();
+    indices.clear();
+    adjencyList.clear();
+
+    // Gera os vértices da grade
+    for (int y = 0; y < ROWS; y++) {
+        for (int x = 0; x < COLUMNS; x++) {
+            float height = 30 * sin(x * 0.1f) * cos(y * 0.1f) + 15 * sin(x * 0.5f) * sin(y * 0.3f) + 8 * cos(x * 1.5f + y * 0.2f); // obtido usando testes
+            vertices.push_back({(float)(x * TERRAIN_SCALE), height, (float)(y * TERRAIN_SCALE)});
+        }
+    }
+
+    // Prepara a lista de adjacência
+    adjencyList.assign(vertices.size(), std::vector<int>());
+
+    // Gera os índices e a lista de adjacência
+    for (int y = 0; y < ROWS - 1; y++) {
+        for (int x = 0; x < COLUMNS - 1; x++) {
+            int topLeft = y * COLUMNS + x;
+            int bottomLeft = (y + 1) * COLUMNS + x;
+            int topRight = y * COLUMNS + (x + 1);
+            int bottomRight = (y + 1) * COLUMNS + (x + 1);
+
+            indices.push_back(topLeft);
+            indices.push_back(bottomLeft);
+            indices.push_back(topRight);
+            indices.push_back(topRight);
+            indices.push_back(bottomLeft);
+            indices.push_back(bottomRight);
+
+            adjencyList[topLeft].push_back(bottomLeft); adjencyList[bottomLeft].push_back(topLeft);
+            adjencyList[topLeft].push_back(topRight); adjencyList[topRight].push_back(topLeft);
+            adjencyList[bottomLeft].push_back(topRight); adjencyList[topRight].push_back(bottomLeft);
+            adjencyList[bottomLeft].push_back(bottomRight); adjencyList[bottomRight].push_back(bottomLeft);
+            adjencyList[topRight].push_back(bottomRight); adjencyList[bottomRight].push_back(topRight);
+        }
+    }
+    
+    // Translada o terreno para a origem para que a câmera padrão funcione bem
+    for (auto& v : vertices) {
+        v.x -= WIDTH / 2.0f;
+        v.z -= HEIGHT / 2.0f;
+    }
+}
+
+// ===================================================================
+// MÉTODO 2: Importa modelo .obj
+// ===================================================================
+void processImportedModel(ObjModel *model) {
+    vertices.clear();
+    indices.clear();
+    adjencyList.clear();
+
+    if (!model || model->vertexCount == 0) 
+        return;
+
+    // (mybib.c) box É a menor caixa retangular que contém o objeto inteiro.
+    // Lógica para centralizar e escalonar o modelo
+    float centerX = (model->box.minX + model->box.maxX) / 2.0f;
+    float centerY = (model->box.minY + model->box.maxY) / 2.0f;
+    float centerZ = (model->box.minZ + model->box.maxZ) / 2.0f;
+    float sizeX = model->box.maxX - model->box.minX; //subtrai a coordenada minima da máxima
+    float sizeY = model->box.maxY - model->box.minY;
+    float sizeZ = model->box.maxZ - model->box.minZ;
+    float modelSize = std::max({sizeX, sizeY, sizeZ}); //fazemos isso pra escalar de forma uniforme
+    float scaleFactor = (modelSize > 0) ? 100.0f / modelSize : 1.0f; // a maior dimensao do objeto importado tenha o tamanho padrao de 100 fator = tamanho_desejado / tamanho_atual
+
+    // Processa os vértices com a transformação
+    vertices.reserve(model->vertexCount);
+
+
+    for (int i = 0; i < model->vertexCount; i++) {
+        float newX = (model->vertices[i].x - centerX) * scaleFactor;
+        float newY = (model->vertices[i].y - centerY) * scaleFactor;
+        float newZ = (model->vertices[i].z - centerZ) * scaleFactor;
+        vertices.push_back({newX, newY, newZ});
+    }
+
+    // Preenche a lista de adjacência e os índices a partir das faces
+    adjencyList.assign(vertices.size(), std::vector<int>());
+    indices.reserve(model->faceCount * 3);
+    for (int i = 0; i < model->faceCount; i++) {
+        const Face& face = model->faces[i];
+        int v1 = face.v1 - 1;
+        int v2 = face.v2 - 1;
+        int v3 = face.v3 - 1;
+
+        indices.push_back(v1);
+        indices.push_back(v2);
+        indices.push_back(v3);
+
+        adjencyList[v1].push_back(v2); adjencyList[v2].push_back(v1);
+        adjencyList[v2].push_back(v3); adjencyList[v3].push_back(v2);
+        adjencyList[v3].push_back(v1); adjencyList[v1].push_back(v3);
+    }
+}
+
 // Na sua função handleKeyboard, mude as chamadas:
 void handleKeyboard(unsigned char key, int x, int y) {
     switch(key) {
@@ -138,11 +195,12 @@ std::string makeKey(const Vertex& v) {
 
 void processTerrain(ObjModel *model){
     vertices.clear(); //limpa toda estrutura que estava previamente armazenada
-    vertices.reserve(model->vertexCount);
     adjencyList.clear();
+    indices.clear();
+    
+    
     if (!model || model->vertexCount == 0) return;
 
-    // --- Lógica de Centralização e Escala (movida para cá) ---
     float centerX = (model->box.minX + model->box.maxX) / 2.0f;
     float centerY = (model->box.minY + model->box.maxY) / 2.0f;
     float centerZ = (model->box.minZ + model->box.maxZ) / 2.0f;
@@ -154,7 +212,7 @@ void processTerrain(ObjModel *model){
 
     float scaleFactor = 1.0f;
     if (modelSize > 0) {
-        scaleFactor = 100.0f / modelSize; // Queremos que o modelo tenha ~100 unidades de tamanho
+        scaleFactor = 100.0f / modelSize; // o modelo vai ter cerca de 100 unidades de tamanho
     }
 
     // --- Processamento dos Vértices com Transformação ---
@@ -166,7 +224,7 @@ void processTerrain(ObjModel *model){
         float originalZ = model->vertices[i].z;
 
         // Aplica a translação e a escala
-        float newX = (originalX - centerX) * scaleFactor;
+        float newX = (originalX - centerX) * scaleFactor; //pega a coordenada X original e subtrai do centro do modelo
         float newY = (originalY - centerY) * scaleFactor;
         float newZ = (originalZ - centerZ) * scaleFactor;
 
@@ -178,9 +236,6 @@ void processTerrain(ObjModel *model){
     indices.reserve(model->faceCount * 3);
     for(int i = 0; i < model->faceCount;i++){
         const Face& face = model->faces[i];
-
-
-        
 
         //os indices do .obj comecam em 1, por isso subtrai de um 
         int v1 = face.v1 - 1;
@@ -251,61 +306,51 @@ void generateTerrain() {
 
 void drawTerrain() {
     glPushMatrix();
-    //glTranslatef(-WIDTH/ 2.0f, -HEIGHT/2.0f, 0.0f);
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glVertexPointer(3, GL_FLOAT, sizeof(Vertex), vertices.data());
+    glEnableClientState(GL_VERTEX_ARRAY); //falar dessa call back glEnableClientState
+    glVertexPointer(3, GL_FLOAT, sizeof(Vertex), vertices.data()); // glVertexPointer falar dessa tambem
     glColor3f(0.2f, 0.6f, 0.3f);
-    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data());
+    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data()); //entender melhor essa aqui tambem
     glDisableClientState(GL_VERTEX_ARRAY);
 
     glPopMatrix();
 }
 
 void drawParticle(){
-    glPushMatrix();
-    //glTranslatef(-WIDTH / 2.0f, -HEIGHT / 2.0f, 0);
-    glTranslatef(particle.x, particle.y, particle.z);
-    glColor3f(1.0f, 0.0f, 0.0f);
-    glutSolidSphere(6.0, 16, 16);
-    glPopMatrix();
-}
-
-
-void movementInfo(int fromIndex, int toIndex){
-    //check for valid indices
-    if(fromIndex < 0 || fromIndex >= vertices.size() || toIndex < 0 || toIndex >= vertices.size()){
-        return;
+    //so desenha se tiver numa posicao valida
+    if(particle.currentVertexIndex >= 0){
+        glPushMatrix();
+        glTranslatef(particle.x, particle.y, particle.z);
+        glColor3f(1.0f, 0.0f, 0.0f);
+        glutSolidSphere(3.0, 16, 16); //raio 3
+        glPopMatrix();
     }
-
-
-    const Vertex& fromVertex = vertices[fromIndex];
-    const Vertex& toVertex = vertices[toIndex];
-
-
-    // Configura o std::cout para imprimir números de ponto flutuante com 2 casas decimais
-    std::cout << std::fixed << std::setprecision(2);
     
-    std::cout << "Movendo particula:" << std::endl;
-    std::cout << "  De (Atual):  Vertice [" << fromIndex << "] | Altura: " << fromVertex.y << std::endl;
-    std::cout << "  Para (Proximo): Vertice [" << toIndex << "] | Altura: " << toVertex.y << std::endl;
-    std::cout << "------------------------------------------" << std::endl;
 }
 
 
-// void handleKeyboard(unsigned char key, int x, int y) {
-//     switch(key) {
-//         case 27: exit(0); break;
-//         case 'w': camera.moveForward(10); break;
-//         case 's': camera.moveForward(-10); break;
-//         case 'a': camera.rotateY(-5); break;  //left
-//         case 'd': camera.rotateY(5);  break;  //right
-//         case 'r': resetParticle(); break;
-//     }
-//     glutPostRedisplay();
-// }
+
+void particlePrintingInformation(int selectedIndex){
+    if (selectedIndex < 0 || selectedIndex >= vertices.size()) 
+        return;
+
+    std::cout << std::fixed << std::setprecision(2);
+
+    std::cout << "******************************************" << std::endl;
+    std::cout << "escoamento iniciado!" << std::endl;
+    std::cout << "  Vertice selecionado: [" << selectedIndex << "] | Altura: " << vertices[selectedIndex].y << std::endl;
+    std::cout << "******************************************" << std::endl;
+}
+void movementInfo(int fromIndex, int toIndex){
+    std::cout << "  Movendo: De [" << fromIndex << "] para [" << toIndex << "]" << std::endl;
+
+}
+
+
+
 void flowSimulation(int value){
     if (particle.currentVertexIndex < 0){
-        resetParticle();
+        glutTimerFunc(1200, flowSimulation, 0); // fica nesse loop para permitir novos cliques
+        return; //evitar seg fault se 
     }
 
     int currentIndex = particle.currentVertexIndex;
@@ -334,63 +379,166 @@ void flowSimulation(int value){
     }
 
     glutPostRedisplay(); // é o comando que garante que a função display() seja chamada para desenhar a partícula em sua nova posição
-    glutTimerFunc(400, flowSimulation, 0);
+    glutTimerFunc(600, flowSimulation, 0);
 }
 
-void reshape(int width, int height) {
-    glViewport(0, 0, width, height);
+
+void setupMainCamera(int w, int h) {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(60.0, (float)width/height, 1.0, 3000.0);
+    gluPerspective(60.0, (float)w / (h ? h : 1), 1.0, 5000.0);
     glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    cameraApplyView(&camera);
 }
+
+void setupMinimapCamera() {
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    // Projeção ortogonal que enquadra a área do terreno procedural
+    glOrtho(-WIDTH/2.0, WIDTH/2.0, -HEIGHT/2.0, HEIGHT/2.0, -1000.0, 1000.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    // Câmera fixa olhando de cima para baixo
+    gluLookAt(0, 400, 0, 0, 0, 0, 0, 0, -1);
+}
+
 
 
 void display() {
+    // Obtém as dimensões atuais da janela
+    int w = glutGet(GLUT_WINDOW_WIDTH);
+    int h = glutGet(GLUT_WINDOW_HEIGHT);
+
+    // Limpa a tela inteira uma única vez
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glLoadIdentity();
-    //camera.applyView();
-    //drawTerrain();
-    cameraApplyView(&camera);
+
+    // --- 1º PASSE: Desenha a cena principal (perspectiva) ---
+    glViewport(0, 0, w, h); // Usa a janela inteira
+    setupMainCamera(w, h);
     drawTerrain();
     drawParticle();
+
+    // --- 2º PASSE: Desenha o minimapa (ortogonal) ---
+    int minimapSize = h / 4; // Tamanho do minimapa (ex: 1/4 da altura da tela)
+    int margin = 10;         // Margem do canto
+    glViewport(w - minimapSize - margin, h - minimapSize - margin, minimapSize, minimapSize);
+    
+    // Limpa o buffer de profundidade para desenhar o mapa "por cima" de tudo
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    setupMinimapCamera();
+    drawTerrain();
+    drawParticle();
+
     glutSwapBuffers();
 }
 
+void reshape(int width, int height) {
+
+    if (height == 0) 
+        height = 1;
+    glViewport(0, 0, width, height);
+}
+
+void handleMouseClick(int button, int state, int x, int y) {
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+        if (vertices.empty()) return;
+
+        // ==> CORREÇÃO: RECONFIGURA A CÂMERA PRINCIPAL ANTES DE PROJETAR <==
+        int w = glutGet(GLUT_WINDOW_WIDTH);
+        int h = glutGet(GLUT_WINDOW_HEIGHT);
+        glViewport(0, 0, w, h);
+        setupMainCamera(w, h);
+
+        GLdouble modelview[16], projection[16];
+        GLint viewport[4];
+        glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
+        glGetDoublev(GL_PROJECTION_MATRIX, projection);
+        glGetIntegerv(GL_VIEWPORT, viewport);
+
+        float min_dist_sq = -1.0f;
+        int closest_vertex_index = -1;
+
+        for (int i = 0; i < vertices.size(); ++i) {
+            GLdouble screenX, screenY, screenZ;
+            gluProject(vertices[i].x, vertices[i].y, vertices[i].z, modelview, projection, viewport, &screenX, &screenY, &screenZ);
+            float mouse_y_gl = viewport[3] - y;
+            float dx = x - screenX;
+            float dy = mouse_y_gl - screenY;
+            float dist_sq = dx * dx + dy * dy;
+            if (closest_vertex_index == -1 || dist_sq < min_dist_sq) {
+                min_dist_sq = dist_sq;
+                closest_vertex_index = i;
+            }
+        }
+        
+        const float SELECTION_RADIUS = 20.0f;
+        if (closest_vertex_index != -1 && sqrt(min_dist_sq) < SELECTION_RADIUS) {
+            const Vertex& v = vertices[closest_vertex_index];
+            particle.currentVertexIndex = closest_vertex_index;
+            particle.x = v.x;
+            particle.y = v.y;
+            particle.z = v.z;
+            particlePrintingInformation(closest_vertex_index);
+            glutPostRedisplay();
+        }
+    }
+}
+
 int main(int argc, char **argv) {
+    //vou pegar do usuario oq ele quer
+    char choice;
+    std::cout << "Escolha o modo:" << std::endl;
+    std::cout << "Digite 1: Gerar terreno retangular" << std::endl;
+    std::cout << "Digite 2: Importar modelo .obj" << std::endl;
+    std::cout << "opcao: ";
+    std::cin >> choice;
+
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-    glutInitWindowSize(800, 600);
+    glutInitWindowSize(1200, 720);
     glutCreateWindow("Terrain Generation");
 
     glEnable(GL_DEPTH_TEST);
-    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
-
-   
-    
-    // Use esta linha para depurar. Comente-a para ver o modelo sólido.
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); // ver oq essa linha faz tambem
     glClearColor(0.53f, 0.81f, 0.92f, 1.0f); // Cor de fundo
 
     // Inicializa a câmera da biblioteca
     camera.px = 0; camera.py = 50; camera.pz = 200; // Posição inicial afastada
     camera.tx = 0; camera.ty = 0; camera.tz = 0;   // Olhando para a origem
-    //generateTerrain();
 
-    if(!loadOBJ("irregular.obj", "irregular.mtl", &model)){
-        printf("erro importando o objeto\n");
+
+    if(choice == '1') {
+        generateProceduralTerrain();
+    } else if(choice == '2'){
+        std::string objFile, mtlFile;
+        std::cout << "Digite o nome do arquivo .obj: ";
+        std::cin >> objFile;
+
+        std::cout << "Digite o nome do arquivo .mtl: ";
+        std::cin >> mtlFile;
+
+        if(!loadOBJ(objFile.c_str(), mtlFile.c_str(), &model)){
+            printf("erro importando o objeto\n");
+            return -1;
+        }
+
+        processTerrain(&model);
+        freeObjModel(&model);
+    } else {
+        std::cout << "tchau" << std::endl;
         return -1;
     }
 
-    processTerrain(&model);
 
     resetParticle();
+
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(handleKeyboard);
-    glutTimerFunc(100, flowSimulation, 0);
+    glutMouseFunc(handleMouseClick);
+    glutTimerFunc(1200, flowSimulation, 0);
 
     glutMainLoop();
     return 0;
