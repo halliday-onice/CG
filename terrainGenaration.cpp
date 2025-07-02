@@ -9,6 +9,8 @@
 #include <memory> // <- necessário para unique_ptr
 #include "mybib.h"
 #include <algorithm>
+#include <set>
+#include <utility>
 
 // para compilar importando o terreno: 
 //  g++ terrainGenaration.cpp mybib.c -o terrain -framework OpenGL -framework GLUT 
@@ -17,7 +19,7 @@
 
 const int WIDTH = 1400;
 const int HEIGHT = 1000;
-const int TERRAIN_SCALE = 20; //isso aqui eh pra o terreno nao ter 
+const int TERRAIN_SCALE = 20; //isso aqui eh pra ter uma especie de escala
 const int COLUMNS = WIDTH/ TERRAIN_SCALE;
 const int ROWS = HEIGHT / TERRAIN_SCALE;
 
@@ -36,6 +38,10 @@ std::vector<std::vector<int>> adjencyList; //cria uma lista de vertices, e pra c
 // O índice da lista externa corresponde ao índice do vértice que estamos consultando
 ObjModel model;
 
+
+//estruturas para guardar os vertices que para pintar o caminho
+std::set<int>traversedVertex; //conjunto dos indices de cada vertice
+std::set<std::pair<int, int>> traversedEdges; //guarda dois numeros int que definem uma unica aresta. Aresta que liga vertice a ao b ficaria
 
 void cameraApplyView(const Camera* cam) {
     gluLookAt(cam->px, cam->py, cam->pz, cam->tx, cam->ty, cam->tz, 0.0f, 1.0f, 0.0f);
@@ -74,9 +80,9 @@ void resetParticle() {
 }
 
 
-// =======================
-// Geração de um terreno pelo código
-// =======================
+// ================
+// Geração de um terreno 
+
 void generateProceduralTerrain() {
     vertices.clear();
     indices.clear();
@@ -116,70 +122,17 @@ void generateProceduralTerrain() {
         }
     }
     
-    // Translada o terreno para a origem para que a câmera padrão funcione bem
+    // arrasta o terreno para a origem para que a câmera1 funcione bem
     for (auto& v : vertices) {
         v.x -= WIDTH / 2.0f;
         v.z -= HEIGHT / 2.0f;
     }
 }
 
-// ===================================================================
-// MÉTODO 2: Importa modelo .obj
-// ===================================================================
-void processImportedModel(ObjModel *model) {
-    vertices.clear();
-    indices.clear();
-    adjencyList.clear();
 
-    if (!model || model->vertexCount == 0) 
-        return;
-
-    // (mybib.c) box É a menor caixa retangular que contém o objeto inteiro.
-    // Lógica para centralizar e escalonar o modelo
-    float centerX = (model->box.minX + model->box.maxX) / 2.0f;
-    float centerY = (model->box.minY + model->box.maxY) / 2.0f;
-    float centerZ = (model->box.minZ + model->box.maxZ) / 2.0f;
-    float sizeX = model->box.maxX - model->box.minX; //subtrai a coordenada minima da máxima
-    float sizeY = model->box.maxY - model->box.minY;
-    float sizeZ = model->box.maxZ - model->box.minZ;
-    float modelSize = std::max({sizeX, sizeY, sizeZ}); //fazemos isso pra escalar de forma uniforme
-    float scaleFactor = (modelSize > 0) ? 100.0f / modelSize : 1.0f; // a maior dimensao do objeto importado tenha o tamanho padrao de 100 fator = tamanho_desejado / tamanho_atual
-
-    // Processa os vértices com a transformação
-    vertices.reserve(model->vertexCount);
-
-
-    for (int i = 0; i < model->vertexCount; i++) {
-        float newX = (model->vertices[i].x - centerX) * scaleFactor;
-        float newY = (model->vertices[i].y - centerY) * scaleFactor;
-        float newZ = (model->vertices[i].z - centerZ) * scaleFactor;
-        vertices.push_back({newX, newY, newZ});
-    }
-
-    // Preenche a lista de adjacência e os índices a partir das faces
-    adjencyList.assign(vertices.size(), std::vector<int>());
-    indices.reserve(model->faceCount * 3);
-    for (int i = 0; i < model->faceCount; i++) {
-        const Face& face = model->faces[i];
-        int v1 = face.v1 - 1;
-        int v2 = face.v2 - 1;
-        int v3 = face.v3 - 1;
-
-        indices.push_back(v1);
-        indices.push_back(v2);
-        indices.push_back(v3);
-
-        adjencyList[v1].push_back(v2); adjencyList[v2].push_back(v1);
-        adjencyList[v2].push_back(v3); adjencyList[v3].push_back(v2);
-        adjencyList[v3].push_back(v1); adjencyList[v1].push_back(v3);
-    }
-}
-
-// Na sua função handleKeyboard, mude as chamadas:
 void handleKeyboard(unsigned char key, int x, int y) {
     switch(key) {
-        case 27: exit(0); break;
-        // Passe o endereço da câmera global para as funções
+        case 27: exit(0); break; // 27 eh o exit
         case 'w': cameraMoveForward(&camera, 10); break;
         case 's': cameraMoveForward(&camera, -10); break;
         case 'a': cameraRotateY(&camera, -5); break;
@@ -187,10 +140,6 @@ void handleKeyboard(unsigned char key, int x, int y) {
         case 'r': resetParticle(); break;
     }
     glutPostRedisplay();
-}
-
-std::string makeKey(const Vertex& v) {
-    return std::to_string(v.x) + "," + std::to_string(v.y) + "," + std::to_string(v.z);
 }
 
 void processTerrain(ObjModel *model){
@@ -214,21 +163,21 @@ void processTerrain(ObjModel *model){
     if (modelSize > 0) {
         scaleFactor = 100.0f / modelSize; // o modelo vai ter cerca de 100 unidades de tamanho
     }
-
-    // --- Processamento dos Vértices com Transformação ---
+    //faco com que a maior dimensao fique 100
+    // processa vertices em transformacao
     vertices.reserve(model->vertexCount);
     for(int i = 0; i < model->vertexCount; i++){
-        // Pega o vértice original
+        // pega o vértice original
         float originalX = model->vertices[i].x;
         float originalY = model->vertices[i].y;
         float originalZ = model->vertices[i].z;
 
-        // Aplica a translação e a escala
+        // aplica a translação e a escala
         float newX = (originalX - centerX) * scaleFactor; //pega a coordenada X original e subtrai do centro do modelo
         float newY = (originalY - centerY) * scaleFactor;
         float newZ = (originalZ - centerZ) * scaleFactor;
 
-        // Adiciona o vértice JÁ TRANSFORMADO à nossa lista
+        // Adiciona o vértice !!!JÁ TRANSFORMADO!!!! na lista de vertices
         vertices.push_back({newX, newY, newZ});
     }
     //construir a lista de adjacencia
@@ -246,7 +195,7 @@ void processTerrain(ObjModel *model){
         indices.push_back(v2);
         indices.push_back(v3);
 
-        // Adiciona as conexões recíprocas para cada aresta do triângulo (v1-v2, v2-v3, v3-v1)
+        // adiciona as conexões recíprocas para cada aresta do triângulo (v1-v2, v2-v3, v3-v1)
         adjencyList[v1].push_back(v2);
         adjencyList[v2].push_back(v1);
 
@@ -259,7 +208,7 @@ void processTerrain(ObjModel *model){
 }
 void generateTerrain() {
     //primeiro gerar todos os vertices da grade
-    vertices.reserve(COLUMNS * ROWS);
+    vertices.reserve(COLUMNS * ROWS); //questao de performance, pede pra alocar memoria de tamanho COLUMNS * ROWS
     for (int y = 0; y < ROWS; y++) {
         for (int x = 0; x < COLUMNS; x++) {
             float height = -300 * sin(x * 0.1f) * cos(y * 0.1f) + 150 * sin(x * 0.5f) * sin(y * 0.3f) + 80 * cos(x * 1.5f + y * 0.2f);
@@ -270,13 +219,14 @@ void generateTerrain() {
             vertices.push_back(v);
         }
     }
-    adjencyList.assign(vertices.size(), std::vector<int>()); // Apague todo o conteúdo de adjacencyList. Depois, preencha adjacencyList com vertices.size()  cópias de um novo vetor de inteiros vazio.
-    //O vetor indices armazena os "endereços" dos vértices que formam cada triângulo
+    adjencyList.assign(vertices.size(), std::vector<int>()); // apague todo o conteúdo de adjacencyList. Depois, preencha adjacencyList com vertices.size()  cópias de um novo vetor de inteiros vazio.
+    //o vetor indices armazena os "endereços" dos vértices que formam cada triângulo
     // cada um triangulo precisa de 3 indices para os vertices, e cada quadrado tem 2 triangulos
     //logo 2 * 3 indices por quadrado
     indices.reserve((ROWS - 1) * (COLUMNS - 1) * 6);
 
     //gerar os indices dos vertices e a lista de adj
+    //to iterando sobre os quadrados
     for(int y = 0; y < ROWS - 1; y++){
         for(int x = 0; x <COLUMNS - 1; x++){
             //pegar os 4 indices do quadrado
@@ -294,7 +244,6 @@ void generateTerrain() {
             indices.push_back(bottomRight);
 
             // adiciona as conexoes
-            //
             adjencyList[topLeft].push_back(bottomLeft); adjencyList[bottomLeft].push_back(topLeft);
             adjencyList[topLeft].push_back(topRight); adjencyList[topRight].push_back(topLeft);
             adjencyList[bottomLeft].push_back(topRight); adjencyList[topRight].push_back(bottomLeft); // Aresta diagonal
@@ -335,10 +284,10 @@ void particlePrintingInformation(int selectedIndex){
 
     std::cout << std::fixed << std::setprecision(2);
 
-    std::cout << "******************************************" << std::endl;
+    std::cout << "************************" << std::endl;
     std::cout << "escoamento iniciado!" << std::endl;
     std::cout << "  Vertice selecionado: [" << selectedIndex << "] | Altura: " << vertices[selectedIndex].y << std::endl;
-    std::cout << "******************************************" << std::endl;
+    std::cout << "***********************" << std::endl;
 }
 void movementInfo(int fromIndex, int toIndex){
     std::cout << "  Movendo: De [" << fromIndex << "] para [" << toIndex << "]" << std::endl;
@@ -346,19 +295,18 @@ void movementInfo(int fromIndex, int toIndex){
 }
 
 
-
 void flowSimulation(int value){
     if (particle.currentVertexIndex < 0){
         glutTimerFunc(1200, flowSimulation, 0); // fica nesse loop para permitir novos cliques
-        return; //evitar seg fault se 
+        return; //evitar seg fault, tava tomando um monte
     }
 
-    int currentIndex = particle.currentVertexIndex;
-    const auto& neighbors = adjencyList[currentIndex];
+    int currentIndex = particle.currentVertexIndex; // descubro em qual vertice a particula esta nesse momento
+    const auto& neighbors = adjencyList[currentIndex]; //vai ate adjencyList e procura pelo inidice, mas esse indice, na adjancyList[currentIndex] contem todos os vizinhos do vertice buscado
 
     int nextIndexToMove = -1;
 
-    float minimumHeight = vertices[currentIndex].y;
+    float minimumHeight = vertices[currentIndex].y; // altura do ponto de partida pra fazer a preparacao
 
     //procurando pela menor altura
     for(int indexOfNeighbor: neighbors){
@@ -370,8 +318,14 @@ void flowSimulation(int value){
     //se nextIndexToMove for igual a -1, nao foi encontrado um vizinho mais baixo que a posicao atual
     if (nextIndexToMove != -1){
         movementInfo(currentIndex, nextIndexToMove);
-        particle.currentVertexIndex = nextIndexToMove; // "faça com que a animacao va para a direcao do"
+        particle.currentVertexIndex = nextIndexToMove; // "faça com que a animacao va para a direcao do novo indice, o indice que deve ter a menor altura, que foi encontrado agr "
         const auto& nextVertex = vertices[nextIndexToMove]; // forma moderna e eficiente em C++ de se referir a um objeto sem criar uma cópia dele, o que torna o código mais rápido
+        
+        //guardo o vertice que foi selecionado
+        traversedVertex.insert(nextIndexToMove);
+        //guardo a aresta
+        traversedEdges.insert({std::min(currentIndex, nextIndexToMove),std::max(currentIndex, nextIndexToMove)});
+        
         //atualiza as posicoes, visualmente na animacao
         particle.x = nextVertex.x;
         particle.y = nextVertex.y;
@@ -383,6 +337,33 @@ void flowSimulation(int value){
 }
 
 
+void drawEdgePaths(){
+    glPushMatrix();
+    glLineWidth(2.8f); //desenha a linha
+    glColor3f(1.0f, 1.0f, 0.0f); //cor amarela
+    glBegin(GL_LINES);
+    for(const auto& edge: traversedEdges){
+        glVertex3fv(&vertices[edge.first].x);
+        glVertex3fv(&vertices[edge.second].x);
+    }
+    glEnd();
+    glLineWidth(1.0f);
+    glPopMatrix();
+}
+
+void drawPathVertices(){
+    glPushMatrix();
+    glPointSize(5.0f);
+    glColor3f(1.0f, 1.0f, 0.0f);
+    glBegin(GL_POINTS);
+    for( int i: traversedVertex){
+        glVertex3fv(&vertices[i].x);
+    }
+
+    glEnd();
+    glPointSize(1.0f);
+    glPopMatrix();
+}
 void setupMainCamera(int w, int h) {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -395,40 +376,41 @@ void setupMainCamera(int w, int h) {
 void setupMinimapCamera() {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    // Projeção ortogonal que enquadra a área do terreno procedural
-    glOrtho(-WIDTH/2.0, WIDTH/2.0, -HEIGHT/2.0, HEIGHT/2.0, -1000.0, 1000.0);
+    glOrtho(-HEIGHT/2.0, HEIGHT/2.0, -100,100, -1000, 1000);
+
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    // Câmera fixa olhando de cima para baixo
-    gluLookAt(0, 400, 0, 0, 0, 0, 0, 0, -1);
+    gluLookAt(700, 0, 0, 0, 0, 0, 0, 1, 0);
 }
 
 
-
 void display() {
-    // Obtém as dimensões atuais da janela
+    // pego as dimensões atuais da janela
     int w = glutGet(GLUT_WINDOW_WIDTH);
     int h = glutGet(GLUT_WINDOW_HEIGHT);
 
-    // Limpa a tela inteira uma única vez
+    // limpo a tela inteira uma única vez
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // --- 1º PASSE: Desenha a cena principal (perspectiva) ---
-    glViewport(0, 0, w, h); // Usa a janela inteira
+    //desenho a cena principal
+    glViewport(0, 0, w, h); //janela inteira
     setupMainCamera(w, h);
     drawTerrain();
+    drawEdgePaths();
+    drawPathVertices();
     drawParticle();
 
-    // --- 2º PASSE: Desenha o minimapa (ortogonal) ---
-    int minimapSize = h / 4; // Tamanho do minimapa (ex: 1/4 da altura da tela)
-    int margin = 10;         // Margem do canto
+    // ---viewport lateral
+    int minimapSize = h / 4 ; // tamanho do minimapa (ex: 1/4 da altura da tela)
+    int margin = 10;         // margem do canto
     glViewport(w - minimapSize - margin, h - minimapSize - margin, minimapSize, minimapSize);
-    
-    // Limpa o buffer de profundidade para desenhar o mapa "por cima" de tudo
+    // Limpa o buffer 
     glClear(GL_DEPTH_BUFFER_BIT);
 
     setupMinimapCamera();
     drawTerrain();
+    drawEdgePaths();
+    drawPathVertices();
     drawParticle();
 
     glutSwapBuffers();
@@ -445,37 +427,45 @@ void handleMouseClick(int button, int state, int x, int y) {
     if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
         if (vertices.empty()) return;
 
-        // ==> CORREÇÃO: RECONFIGURA A CÂMERA PRINCIPAL ANTES DE PROJETAR <==
+    
         int w = glutGet(GLUT_WINDOW_WIDTH);
         int h = glutGet(GLUT_WINDOW_HEIGHT);
         glViewport(0, 0, w, h);
         setupMainCamera(w, h);
 
+        //pego as informacoes 
+        //modelview:pego informacao de posicao e orientacao da camera
+        //projection:pego a informacao da camera1 - a principal
         GLdouble modelview[16], projection[16];
         GLint viewport[4];
         glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
         glGetDoublev(GL_PROJECTION_MATRIX, projection);
         glGetIntegerv(GL_VIEWPORT, viewport);
 
-        float min_dist_sq = -1.0f;
+        float min_dist_sq = -1.0f; //pego o vertice mais proximo
         int closest_vertex_index = -1;
 
         for (int i = 0; i < vertices.size(); ++i) {
             GLdouble screenX, screenY, screenZ;
+            //projeto o ponto para tridimensional para a tela 2D
             gluProject(vertices[i].x, vertices[i].y, vertices[i].z, modelview, projection, viewport, &screenX, &screenY, &screenZ);
-            float mouse_y_gl = viewport[3] - y;
+            float mouse_y_gl = viewport[3] - y;//converto a coordenada y 
             float dx = x - screenX;
             float dy = mouse_y_gl - screenY;
-            float dist_sq = dx * dx + dy * dy;
+            float dist_sq = dx * dx + dy * dy;//calcula a distancia entre o ponto e o vertice
+            //verifico se eh o ponto mais proximo ate agora
             if (closest_vertex_index == -1 || dist_sq < min_dist_sq) {
                 min_dist_sq = dist_sq;
                 closest_vertex_index = i;
             }
         }
-        
+        //closest_vertex_index contem o indice do vertice que esta visualmente mais proximo de
+        //oonde foi clicado
         const float SELECTION_RADIUS = 20.0f;
+        //verifico a distancia eh menor que o raio(o nosso erro)
+        //evito que um clique no nada faca com q ocorra algo
         if (closest_vertex_index != -1 && sqrt(min_dist_sq) < SELECTION_RADIUS) {
-            const Vertex& v = vertices[closest_vertex_index];
+            const Vertex& v = vertices[closest_vertex_index]; // define o vertice como da particula para oq foi selecionado
             particle.currentVertexIndex = closest_vertex_index;
             particle.x = v.x;
             particle.y = v.y;
@@ -500,26 +490,23 @@ int main(int argc, char **argv) {
     glutInitWindowSize(1200, 720);
     glutCreateWindow("Terrain Generation");
 
-    glEnable(GL_DEPTH_TEST);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); // ver oq essa linha faz tambem
-    glClearColor(0.53f, 0.81f, 0.92f, 1.0f); // Cor de fundo
+    glEnable(GL_DEPTH_TEST); // ligo z buffer
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //como devo desenhar os triangulos(forma do triangulo, so desennha a linha do triangulo)
+    glClearColor(0.53f, 0.81f, 0.92f, 1.0f); // cor de fundo
 
-    // Inicializa a câmera da biblioteca
-    camera.px = 0; camera.py = 50; camera.pz = 200; // Posição inicial afastada
-    camera.tx = 0; camera.ty = 0; camera.tz = 0;   // Olhando para a origem
+    // inicializa a câmera da biblioteca
+    camera.px = 0; camera.py = 150; camera.pz = 350; // posição inicial afastada
+    camera.tx = 0; camera.ty = 0; camera.tz = 0;   // olhando para a origem
 
 
     if(choice == '1') {
         generateProceduralTerrain();
     } else if(choice == '2'){
-        std::string objFile, mtlFile;
+        std::string objFile;
         std::cout << "Digite o nome do arquivo .obj: ";
         std::cin >> objFile;
 
-        std::cout << "Digite o nome do arquivo .mtl: ";
-        std::cin >> mtlFile;
-
-        if(!loadOBJ(objFile.c_str(), mtlFile.c_str(), &model)){
+        if(!loadOBJ(objFile.c_str(), "", &model)){
             printf("erro importando o objeto\n");
             return -1;
         }
