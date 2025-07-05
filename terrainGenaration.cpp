@@ -1,4 +1,4 @@
-#define GL_SILENCE_DEPRECATION
+#define GL_SILENCE_DEPRECATION //sileciar warnings no MacOS
 #include <iostream>
 #include <iomanip>
 #include <cmath>
@@ -16,18 +16,29 @@
 //  g++ terrainGenaration.cpp mybib.c -o terrain -framework OpenGL -framework GLUT 
 //  vai dar um warning por conta da diferenca de c e c++
 
+const float SPEED_PARTICLE = 0.02f;
 
 const int WIDTH = 1400;
 const int HEIGHT = 1000;
 const int TERRAIN_SCALE = 20; //isso aqui eh pra ter uma especie de escala
 const int COLUMNS = WIDTH/ TERRAIN_SCALE;
 const int ROWS = HEIGHT / TERRAIN_SCALE;
+int isWireframe = true;
 
 struct Particle {
-    float x,y,z;
+    int targetVertexIndex = -1;
     int currentVertexIndex = -1; // inicializa com -1 porque ainda não conhece o proximo destino válido para se mover
+    float progress = 0.0f;
 };
 
+//struct criada para pegar todo o terreno da camera vista de cima- ver a funcao setUpTopDownCamera()
+
+struct BoundingBox {
+    float minX, maxX, minY, maxY, minZ, maxZ;
+};
+
+BoundingBox terrainBounds;
+std::vector<Particle> particles; //vetor pra guardar as múltiplas particulas
 Camera camera;
 Particle particle;
 std::vector<Vertex> vertices;
@@ -43,8 +54,86 @@ ObjModel model;
 std::set<int>traversedVertex; //conjunto dos indices de cada vertice
 std::set<std::pair<int, int>> traversedEdges; //guarda dois numeros int que definem uma unica aresta. Aresta que liga vertice a ao b ficaria
 
+//vetor de normais para visualizacao preenchida
+std::vector<Vertex> normals;
 void cameraApplyView(const Camera* cam) {
     gluLookAt(cam->px, cam->py, cam->pz, cam->tx, cam->ty, cam->tz, 0.0f, 1.0f, 0.0f);
+}
+
+void calculateBounds(){
+    if (vertices.empty())
+        return;
+    
+        terrainBounds.minX = terrainBounds.maxX = vertices[0].x;
+        terrainBounds.minY = terrainBounds.maxY = vertices[0].y;
+        terrainBounds.minZ = terrainBounds.maxZ = vertices[0].z;
+
+        for(const auto& v: vertices){
+            if (v.x < terrainBounds.minX)
+                terrainBounds.minX = v.x;
+            if (v.x > terrainBounds.maxX)
+                terrainBounds.maxX = v.x;
+            if (v.y < terrainBounds.minY)
+                terrainBounds.minY = v.y;
+            if (v.y > terrainBounds.maxY)
+                terrainBounds.maxY = v.y;
+            if (v.z < terrainBounds.minZ)
+                terrainBounds.minZ = v.z;
+            if (v.z > terrainBounds.maxZ)
+                terrainBounds.maxZ = v.z;
+        }
+        
+}
+
+void calculateNormals() {
+    if (vertices.empty() || indices.empty()) return;
+
+    // inicializo um vetor de normais com o mesmo tamanho do de vértices, preenchido com zeros.
+    normals.assign(vertices.size(), {0.0f, 0.0f, 0.0f});
+
+    // itero por cada triângulo da malha.
+    for (size_t i = 0; i < indices.size(); i += 3) {
+        // pego os indices dos três vértices do triangulo.
+        int i1 = indices[i];
+        int i2 = indices[i+1];
+        int i3 = indices[i+2];
+
+        // pego as coordenadas dos vértices.
+        const Vertex& v1 = vertices[i1];
+        const Vertex& v2 = vertices[i2];
+        const Vertex& v3 = vertices[i3];
+
+        // Calcula os dois vetores da aresta do triângulo.
+        Vertex edge1 = {v2.x - v1.x, v2.y - v1.y, v2.z - v1.z};
+        Vertex edge2 = {v3.x - v1.x, v3.y - v1.y, v3.z - v1.z};
+
+        // Calcula a normal da face usando o produto vetorial.
+        Vertex faceNormal;
+        faceNormal.x = edge1.y * edge2.z - edge1.z * edge2.y;
+        faceNormal.y = edge1.z * edge2.x - edge1.x * edge2.z;
+        faceNormal.z = edge1.x * edge2.y - edge1.y * edge2.x;
+
+        // 3. Adiciona a normal da face a cada um dos três vértices do triângulo.
+        normals[i1].x += faceNormal.x; 
+        normals[i1].y += faceNormal.y; 
+        normals[i1].z += faceNormal.z;
+        normals[i2].x += faceNormal.x; 
+        normals[i2].y += faceNormal.y; 
+        normals[i2].z += faceNormal.z;
+        normals[i3].x += faceNormal.x; 
+        normals[i3].y += faceNormal.y; 
+        normals[i3].z += faceNormal.z;
+    }
+
+    // 4. Normaliza todos os vetores normais dos vértices.
+    for (auto& normal : normals) {
+        float len = sqrt(normal.x *normal.x + normal.y *normal.y + normal.z *normal.z);
+        if (len > 0.0f) {
+            normal.x /= len;
+            normal.y /= len;
+            normal.z /= len;
+        }
+    }
 }
 
 void cameraMoveForward(Camera* cam, float passo) {
@@ -81,7 +170,7 @@ void resetParticle() {
 
 
 // ================
-// Geração de um terreno 
+// Geração de um terreno pelo código
 
 void generateProceduralTerrain() {
     vertices.clear();
@@ -127,6 +216,8 @@ void generateProceduralTerrain() {
         v.x -= WIDTH / 2.0f;
         v.z -= HEIGHT / 2.0f;
     }
+
+    calculateNormals();
 }
 
 
@@ -138,6 +229,15 @@ void handleKeyboard(unsigned char key, int x, int y) {
         case 'a': cameraRotateY(&camera, -5); break;
         case 'd': cameraRotateY(&camera, 5);  break;
         case 'r': resetParticle(); break;
+        case 'f': 
+            isWireframe = !isWireframe;
+            if(isWireframe){
+                glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+                std::cout << "visualizacao: Wireframe" << std::endl;
+            } else {
+                glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+                std::cout << "isualizacao: filled" << std::endl;
+            }
     }
     glutPostRedisplay();
 }
@@ -180,7 +280,7 @@ void processTerrain(ObjModel *model){
         // Adiciona o vértice !!!JÁ TRANSFORMADO!!!! na lista de vertices
         vertices.push_back({newX, newY, newZ});
     }
-    //construir a lista de adjacencia
+    //construo a lista de adjacencia
     adjencyList.assign(vertices.size(), std::vector<int>());
     indices.reserve(model->faceCount * 3);
     for(int i = 0; i < model->faceCount;i++){
@@ -204,6 +304,8 @@ void processTerrain(ObjModel *model){
 
         adjencyList[v3].push_back(v1);
         adjencyList[v1].push_back(v3);
+
+        calculateNormals();
     }
 }
 void generateTerrain() {
@@ -255,10 +357,23 @@ void generateTerrain() {
 
 void drawTerrain() {
     glPushMatrix();
-    glEnableClientState(GL_VERTEX_ARRAY); //falar dessa call back glEnableClientState
-    glVertexPointer(3, GL_FLOAT, sizeof(Vertex), vertices.data()); // glVertexPointer falar dessa tambem
+    
+    // habilita o uso de arrays de vértices e normais
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_NORMAL_ARRAY);
+
+    // Aponta para os dados dos vértices e das normais
+    glVertexPointer(3, GL_FLOAT, sizeof(Vertex), vertices.data());
+    glNormalPointer(GL_FLOAT, sizeof(Vertex), normals.data());
+
+    // cor do material pra iluminação
     glColor3f(0.2f, 0.6f, 0.3f);
-    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, indices.data()); //entender melhor essa aqui tambem
+    
+    // desenha triângulos
+    glDrawElements(GL_TRIANGLES, (GLsizei)indices.size(), GL_UNSIGNED_INT, indices.data());
+
+    // Desabilita os arrays
+    glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_VERTEX_ARRAY);
 
     glPopMatrix();
@@ -267,11 +382,20 @@ void drawTerrain() {
 void drawParticle(){
     //so desenha se tiver numa posicao valida
     if(particle.currentVertexIndex >= 0){
-        glPushMatrix();
-        glTranslatef(particle.x, particle.y, particle.z);
-        glColor3f(1.0f, 0.0f, 0.0f);
-        glutSolidSphere(3.0, 16, 16); //raio 3
-        glPopMatrix();
+       const Vertex& startPosition = vertices[particle.currentVertexIndex];
+       //pego a posicao de chegada
+       const Vertex& endPosition = (particle.targetVertexIndex >= 0) ? vertices[particle.targetVertexIndex]: startPosition;
+
+       //aqui uso a interpolacao linear, que basicamente eh
+       // pos = startPos + (endPos - startPos) * progress;
+       float px = startPosition.x + (endPosition.x - startPosition.x) * particle.progress;
+       float py = startPosition.y + (endPosition.y - startPosition.y) * particle.progress;
+       float pz = startPosition.z + (endPosition.z - startPosition.z) * particle.progress;
+
+       glPushMatrix();
+       glTranslatef(px, py, pz);
+       glutSolidSphere(3.0, 16, 16);
+       glPopMatrix();
     }
     
 }
@@ -284,10 +408,10 @@ void particlePrintingInformation(int selectedIndex){
 
     std::cout << std::fixed << std::setprecision(2);
 
-    std::cout << "************************" << std::endl;
+    std::cout << "****" << std::endl;
     std::cout << "escoamento iniciado!" << std::endl;
     std::cout << "  Vertice selecionado: [" << selectedIndex << "] | Altura: " << vertices[selectedIndex].y << std::endl;
-    std::cout << "***********************" << std::endl;
+    std::cout << "****" << std::endl;
 }
 void movementInfo(int fromIndex, int toIndex){
     std::cout << "  Movendo: De [" << fromIndex << "] para [" << toIndex << "]" << std::endl;
@@ -296,44 +420,69 @@ void movementInfo(int fromIndex, int toIndex){
 
 
 void flowSimulation(int value){
-    if (particle.currentVertexIndex < 0){
-        glutTimerFunc(1200, flowSimulation, 0); // fica nesse loop para permitir novos cliques
-        return; //evitar seg fault, tava tomando um monte
+    int needsRedisplay = 0;
+    //animacao so ocorre se houver um alvo e nao chegou ao vertice destino ainda
+    if (particle.currentVertexIndex != -1 ){
+
+            //particula chegou ao destino?
+            if(particle.progress >= 1.0f){
+                particle.progress = 1.0f; // faco a particula parar no alvo
+
+                if(particle.targetVertexIndex != -1){ //se chegou no alvo, este novo alvo eh o novo ponto de partida
+                    particle.currentVertexIndex = particle.targetVertexIndex;
+                }
+                
+                traversedVertex.insert(particle.currentVertexIndex);
+
+                //agora, eu comeco a procurar o novo alvo a partir do novo ponto, caso houver
+                //vejo se tem algum vizinho ligado aquela lista
+                const auto& neighbors = adjencyList[particle.currentVertexIndex];
+                int nextIndexToMove = -1;
+                float minHeight = vertices[particle.currentVertexIndex].y;
+                for(int index: neighbors){ //index eh o indice do vizinho, guardo ele tambem caso haja
+                    if(vertices[index].y < minHeight){
+                        minHeight = vertices[index].y;
+                        nextIndexToMove =index;
+                    }
+                }
+
+                if(nextIndexToMove != -1){ // se tiver o nextIndexToMove diferente de -1 significa que tem um outro vertice, no caso mais baixo
+                    movementInfo(particle.currentVertexIndex, nextIndexToMove);    
+                    particle.targetVertexIndex = nextIndexToMove;
+                    particle.progress = 0.0f;
+
+                    int vertexInitial = particle.currentVertexIndex;
+                    int vertexEnd = nextIndexToMove;
+
+                    //padronizo para a menor aresta ser sempre o menor
+                    int lowerIndex = std::min(vertexInitial, vertexEnd);
+                    int biggerIndex = std::max(vertexInitial, vertexEnd);
+
+                    std::pair<int, int> traversedEdge = {lowerIndex, biggerIndex};
+
+                    traversedEdges.insert(traversedEdge);
+
+
+                } else{
+                    particle.targetVertexIndex = -1;//particula nao encontrada, ja ta no minimo
+                }
+
+            }
+
+            // Se a partícula está no meio de uma viagem, avança o progresso
+            if (particle.targetVertexIndex != -1 && particle.currentVertexIndex != particle.targetVertexIndex) {
+                particle.progress += SPEED_PARTICLE;
+                needsRedisplay = 1;
+            }
+
     }
 
-    int currentIndex = particle.currentVertexIndex; // descubro em qual vertice a particula esta nesse momento
-    const auto& neighbors = adjencyList[currentIndex]; //vai ate adjencyList e procura pelo inidice, mas esse indice, na adjancyList[currentIndex] contem todos os vizinhos do vertice buscado
-
-    int nextIndexToMove = -1;
-
-    float minimumHeight = vertices[currentIndex].y; // altura do ponto de partida pra fazer a preparacao
-
-    //procurando pela menor altura
-    for(int indexOfNeighbor: neighbors){
-        if(vertices[indexOfNeighbor].y < minimumHeight ){ //busca por um vizinho mais baixo, se achar atualizo o indice para p vertice 
-            minimumHeight  = vertices[indexOfNeighbor].y;
-            nextIndexToMove = indexOfNeighbor;
-        }
-    }
-    //se nextIndexToMove for igual a -1, nao foi encontrado um vizinho mais baixo que a posicao atual
-    if (nextIndexToMove != -1){
-        movementInfo(currentIndex, nextIndexToMove);
-        particle.currentVertexIndex = nextIndexToMove; // "faça com que a animacao va para a direcao do novo indice, o indice que deve ter a menor altura, que foi encontrado agr "
-        const auto& nextVertex = vertices[nextIndexToMove]; // forma moderna e eficiente em C++ de se referir a um objeto sem criar uma cópia dele, o que torna o código mais rápido
-        
-        //guardo o vertice que foi selecionado
-        traversedVertex.insert(nextIndexToMove);
-        //guardo a aresta
-        traversedEdges.insert({std::min(currentIndex, nextIndexToMove),std::max(currentIndex, nextIndexToMove)});
-        
-        //atualiza as posicoes, visualmente na animacao
-        particle.x = nextVertex.x;
-        particle.y = nextVertex.y;
-        particle.z = nextVertex.z;
+    if(needsRedisplay){
+        glutPostRedisplay();
     }
 
-    glutPostRedisplay(); // é o comando que garante que a função display() seja chamada para desenhar a partícula em sua nova posição
-    glutTimerFunc(600, flowSimulation, 0);
+    glutTimerFunc(16, flowSimulation, 0); // atualizacao de 60 frames por segundo 
+    
 }
 
 
@@ -373,14 +522,57 @@ void setupMainCamera(int w, int h) {
     cameraApplyView(&camera);
 }
 
+void setUpTopDownCamera(){
+    //void glOrtho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble zNear, GLdouble zFar)
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    float centerX = (terrainBounds.minX + terrainBounds.maxX) /2.0f;
+    float centerZ = (terrainBounds.minZ + terrainBounds.maxZ) /2.0f;
+
+    float sizeX = terrainBounds.maxX - terrainBounds.minX;
+    float sizeZed = terrainBounds.maxZ - terrainBounds.minZ;
+
+    float maxDimension = std::max(sizeX, sizeZed);
+    float halfView = (maxDimension/2.0f) * 1.1f;
+
+    glOrtho(centerX - halfView, centerX + halfView ,centerZ - halfView, centerZ + halfView, -500, 500);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    gluLookAt(centerX, 400, centerZ, centerX,0, centerZ,0,0,-1);
+}
+
 void setupMinimapCamera() {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(-HEIGHT/2.0, HEIGHT/2.0, -100,100, -1000, 1000);
+
+    // calcula o centro do terreno nos eixos que nos interessam para esta vista (Y e Z)
+    float centerY = (terrainBounds.minY + terrainBounds.maxY) / 2.0f;
+    float centerZ = (terrainBounds.minZ + terrainBounds.maxZ) / 2.0f;
+    
+    // calcula o tamanho real do perfil do terreno (altura e profundidade)
+    float sizeY = terrainBounds.maxY - terrainBounds.minY;
+    float sizeZ = terrainBounds.maxZ - terrainBounds.minZ;
+
+    // adiciona uma margem de 10% (para não ficar colado nas bordas)
+    float halfHeight = (sizeY / 2.0f) * 1.1f;
+    float halfWidth = (sizeZ / 2.0f) * 1.1f;
+    
+    // garante que a vista não fique totalmente achatada se o terreno for plano
+    if (halfHeight < 1.0f) halfHeight = 50.0f;
+
+    // usando as proporções reais do modelo
+    // A largura da vista (left/right) corresponde à profundidade Z do terreno
+    // A altura da vista (bottom/top) corresponde à altura Y do terreno
+    glOrtho(centerZ - halfWidth, centerZ + halfWidth, centerY - halfHeight, centerY + halfHeight, -2000.0, 2000.0);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(700, 0, 0, 0, 0, 0, 0, 1, 0);
+    
+    // coloco a câmera na lateral, olhando para o centro 
+    float cameraDistance = terrainBounds.maxX + (terrainBounds.maxX - terrainBounds.minX);
+    gluLookAt(cameraDistance, centerY, centerZ, 
+              0, centerY, centerZ, // Olha para o centro Y/Z do objeto, mas no plano x=0
+              0, 1, 0);
 }
 
 
@@ -408,6 +600,15 @@ void display() {
     glClear(GL_DEPTH_BUFFER_BIT);
 
     setupMinimapCamera();
+    drawTerrain();
+    drawEdgePaths();
+    drawPathVertices();
+    drawParticle();
+
+    //visao de cima
+    glViewport(margin, h - minimapSize - margin, minimapSize, minimapSize);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    setUpTopDownCamera();
     drawTerrain();
     drawEdgePaths();
     drawPathVertices();
@@ -465,12 +666,15 @@ void handleMouseClick(int button, int state, int x, int y) {
         //verifico a distancia eh menor que o raio(o nosso erro)
         //evito que um clique no nada faca com q ocorra algo
         if (closest_vertex_index != -1 && sqrt(min_dist_sq) < SELECTION_RADIUS) {
-            const Vertex& v = vertices[closest_vertex_index]; // define o vertice como da particula para oq foi selecionado
+            traversedVertex.clear();
+            traversedEdges.clear();
+
+            //ponto de partida e ponto de chegada sao iguais
             particle.currentVertexIndex = closest_vertex_index;
-            particle.x = v.x;
-            particle.y = v.y;
-            particle.z = v.z;
+            particle.targetVertexIndex = closest_vertex_index;
+            particle.progress = 1.0f; //comeca parada
             particlePrintingInformation(closest_vertex_index);
+
             glutPostRedisplay();
         }
     }
@@ -491,8 +695,18 @@ int main(int argc, char **argv) {
     glutCreateWindow("Terrain Generation");
 
     glEnable(GL_DEPTH_TEST); // ligo z buffer
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //como devo desenhar os triangulos(forma do triangulo, so desennha a linha do triangulo)
-    glClearColor(0.53f, 0.81f, 0.92f, 1.0f); // cor de fundo
+
+    
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    GLfloat light_pos[] = { 1.0f, 1.0f, 1.0f, 0.0f };
+    glLightfv(GL_LIGHT0, GL_POSITION, light_pos);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+
+    // Define o modo inicial como wireframe
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
 
     // inicializa a câmera da biblioteca
     camera.px = 0; camera.py = 150; camera.pz = 350; // posição inicial afastada
@@ -519,13 +733,13 @@ int main(int argc, char **argv) {
     }
 
 
+    calculateBounds(); // adaptacao para visualizar de cima independente do tamanho do modelo
     resetParticle();
-
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
     glutKeyboardFunc(handleKeyboard);
     glutMouseFunc(handleMouseClick);
-    glutTimerFunc(1200, flowSimulation, 0);
+    glutTimerFunc(16, flowSimulation, 0);
 
     glutMainLoop();
     return 0;
